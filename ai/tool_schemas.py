@@ -104,4 +104,26 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "prepare_chart_data",
+            "description": "Savolga mos chart uchun pandas asosida tozalangan data qaytaradi (bar, pie, line, scatter).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chart_type": {"type": "string", "enum": ["bar", "pie", "line", "scatter"]},
+                    "x_column": {"type": "string"},
+                    "y_column": {"type": "string"},
+                    "metric": {"type": "string", "enum": ["sum", "mean", "min", "max", "count"]},
+                    "top_n": {"type": "integer", "minimum": 1, "maximum": 120},
+                    "date_column": {"type": "string"},
+                    "freq": {"type": "string", "enum": ["D", "W", "M", "Q", "Y"]},
+                    "ascending": {"type": "boolean"},
+                },
+                "required": ["chart_type"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]

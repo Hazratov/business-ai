@@ -39,6 +39,69 @@ def find_column(df, keywords):
             return col
     return None
 
+
+def parse_agent_response(response):
+    if isinstance(response, dict):
+        answer = str(response.get("answer", "")).strip()
+        charts = response.get("charts") if isinstance(response.get("charts"), list) else []
+        return answer, charts
+    return str(response), []
+
+
+def render_agent_charts(charts):
+    if not charts:
+        return
+
+    valid_charts = [chart for chart in charts if isinstance(chart, dict)]
+    if not valid_charts:
+        return
+
+    st.markdown("**Savolga mos grafiklar:**")
+    columns = st.columns(2)
+
+    for idx, chart in enumerate(valid_charts[:4]):
+        chart_type = str(chart.get("chart_type", "bar")).lower()
+        data = chart.get("data")
+        if not isinstance(data, list) or not data:
+            continue
+
+        frame = pd.DataFrame(data)
+        if frame.empty:
+            continue
+
+        title = chart.get("title") or "Analitik chart"
+        target = columns[idx % 2] if len(valid_charts) > 1 else st
+
+        try:
+            if chart_type == "pie":
+                names = chart.get("names") or chart.get("x")
+                values = chart.get("values") or chart.get("y")
+                if names not in frame.columns or values not in frame.columns:
+                    continue
+                fig = px.pie(frame, names=names, values=values, title=title)
+            elif chart_type == "line":
+                x = chart.get("x")
+                y = chart.get("y")
+                if x not in frame.columns or y not in frame.columns:
+                    continue
+                fig = px.line(frame, x=x, y=y, title=title, markers=True)
+            elif chart_type == "scatter":
+                x = chart.get("x")
+                y = chart.get("y")
+                if x not in frame.columns or y not in frame.columns:
+                    continue
+                fig = px.scatter(frame, x=x, y=y, title=title)
+            else:
+                x = chart.get("x")
+                y = chart.get("y")
+                if x not in frame.columns or y not in frame.columns:
+                    continue
+                fig = px.bar(frame, x=x, y=y, title=title, color=y)
+
+            target.plotly_chart(fig, use_container_width=True)
+        except Exception as exc:
+            target.caption(f"Chart chizishda xatolik: {exc}")
+
 def main():
     st.title(T["title"])
 
@@ -124,14 +187,18 @@ def main():
                     response = get_agent_response(
                         user_input,
                         session_id=st.session_state["chat_session_id"],
+                        return_payload=True,
                     )
+                    answer_text, chart_specs = parse_agent_response(response)
                     st.session_state["chat_history"].append(
                         {
                             "question": user_input,
-                            "answer": response,
+                            "answer": answer_text,
+                            "charts": chart_specs,
                         }
                     )
-                    st.markdown(f"**Javob:**\n\n{response}")
+                    st.markdown(f"**Javob:**\n\n{answer_text}")
+                    render_agent_charts(chart_specs)
             else:
                 st.warning("Iltimos, savol kiriting.")
 
@@ -140,6 +207,7 @@ def main():
                 for item in reversed(st.session_state["chat_history"][-10:]):
                     st.markdown(f"**Savol:** {item['question']}")
                     st.markdown(f"**Javob:** {item['answer']}")
+                    render_agent_charts(item.get("charts") or [])
                     st.divider()
     else:
         st.info(T["no_data"])

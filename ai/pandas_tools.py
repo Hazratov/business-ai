@@ -10,6 +10,24 @@ from .data_helpers import (
 )
 
 
+def _coerce_top_n(top_n, max_value=120, default=12):
+    try:
+        parsed = int(top_n)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, max_value))
+
+
+def _first_categorical_column(df, exclude=None):
+    exclude = set(exclude or [])
+    for col in df.columns:
+        if col in exclude:
+            continue
+        if not pd.api.types.is_numeric_dtype(df[col]):
+            return col
+    return None
+
+
 def get_columns(df):
     numeric_columns = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
     return {
@@ -244,6 +262,189 @@ def list_unique_values(df, column, top_n=20):
     }
 
 
+def prepare_chart_data(
+    df,
+    chart_type,
+    x_column=None,
+    y_column=None,
+    metric="sum",
+    top_n=12,
+    date_column=None,
+    freq="M",
+    ascending=False,
+):
+    chart_type = normalize_text(chart_type)
+    metric = normalize_text(metric)
+    allowed_chart_types = {"bar", "pie", "line", "scatter"}
+    allowed_metrics = {"sum", "mean", "min", "max", "count"}
+
+    if chart_type not in allowed_chart_types:
+        return {"error": f"Qo'llab-quvvatlanmaydigan chart_type: {chart_type}"}
+
+    if metric not in allowed_metrics:
+        return {"error": f"Noto'g'ri metric: {metric}"}
+
+    top_n = _coerce_top_n(top_n)
+    defaults = detect_default_columns(df)
+
+    if chart_type in {"bar", "pie"}:
+        target_x_col = resolve_column(df, x_column) if x_column else None
+        if target_x_col is None:
+            target_x_col = (
+                defaults.get("product_column")
+                or defaults.get("region_column")
+                or _first_categorical_column(df)
+            )
+
+        if target_x_col is None:
+            return {"error": "Bar/Pie chart uchun kategorik ustun topilmadi."}
+
+        if metric == "count":
+            grouped = (
+                df.groupby(target_x_col, dropna=False)
+                .size()
+                .reset_index(name="count")
+                .sort_values("count", ascending=bool(ascending))
+                .head(top_n)
+            )
+            value_key = "count"
+            source_y_col = None
+        else:
+            source_y_col = resolve_value_column(df, y_column)
+            if source_y_col is None:
+                return {"error": "Bar/Pie chart uchun sonli ustun topilmadi."}
+
+            temp = df[[target_x_col, source_y_col]].copy()
+            temp[source_y_col] = pd.to_numeric(temp[source_y_col], errors="coerce")
+            temp = temp.dropna(subset=[source_y_col])
+            if temp.empty:
+                return {"error": "Bar/Pie chart uchun mos ma'lumot topilmadi."}
+
+            grouped = (
+                temp.groupby(target_x_col, dropna=False)[source_y_col]
+                .agg(metric)
+                .reset_index(name=metric)
+                .sort_values(metric, ascending=bool(ascending))
+                .head(top_n)
+            )
+            value_key = metric
+
+        chart_data = clean_records(grouped[[target_x_col, value_key]])
+        return {
+            "chart": {
+                "chart_type": chart_type,
+                "title": f"{target_x_col} bo'yicha {value_key}",
+                "x": target_x_col,
+                "y": value_key,
+                "names": target_x_col,
+                "values": value_key,
+                "data": chart_data,
+            },
+            "meta": {
+                "group_column": target_x_col,
+                "value_column": source_y_col,
+                "metric": metric,
+                "top_n": top_n,
+            },
+        }
+
+    if chart_type == "line":
+        target_date_col = resolve_column(df, date_column) if date_column else None
+        if target_date_col is None:
+            target_date_col = defaults.get("date_column")
+
+        if target_date_col is None:
+            return {"error": "Line chart uchun sana ustuni topilmadi."}
+
+        freq = str(freq).upper()
+        if freq not in {"D", "W", "M", "Q", "Y"}:
+            freq = "M"
+
+        temp = pd.DataFrame()
+        temp["_date"] = pd.to_datetime(df[target_date_col], errors="coerce")
+
+        source_y_col = None
+        if metric == "count":
+            temp["_value"] = 1
+            value_key = "count"
+        else:
+            source_y_col = resolve_value_column(df, y_column)
+            if source_y_col is None:
+                return {"error": "Line chart uchun sonli ustun topilmadi."}
+            temp["_value"] = pd.to_numeric(df[source_y_col], errors="coerce")
+            value_key = metric
+
+        temp = temp.dropna(subset=["_date", "_value"])
+        if temp.empty:
+            return {"error": "Line chart uchun mos ma'lumot topilmadi."}
+
+        trend = (
+            temp.groupby(pd.Grouper(key="_date", freq=freq))["_value"]
+            .agg(metric)
+            .dropna()
+            .reset_index(name=value_key)
+            .sort_values("_date", ascending=True)
+            .tail(top_n)
+        )
+        trend["period"] = trend["_date"].dt.strftime("%Y-%m-%d")
+
+        chart_data = clean_records(trend[["period", value_key]])
+        return {
+            "chart": {
+                "chart_type": "line",
+                "title": f"{target_date_col} bo'yicha trend ({value_key})",
+                "x": "period",
+                "y": value_key,
+                "data": chart_data,
+            },
+            "meta": {
+                "date_column": target_date_col,
+                "value_column": source_y_col,
+                "metric": metric,
+                "freq": freq,
+                "top_n": top_n,
+            },
+        }
+
+    numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+    target_x_col = resolve_column(df, x_column, numeric_only=True) if x_column else None
+    target_y_col = resolve_column(df, y_column, numeric_only=True) if y_column else None
+
+    if target_y_col is None:
+        target_y_col = resolve_value_column(df, y_column)
+    if target_x_col is None:
+        target_x_col = numeric_cols[0] if numeric_cols else None
+    if target_x_col == target_y_col:
+        alternatives = [col for col in numeric_cols if col != target_x_col]
+        target_y_col = alternatives[0] if alternatives else target_y_col
+
+    if target_x_col is None or target_y_col is None or target_x_col == target_y_col:
+        return {"error": "Scatter chart uchun ikkita turli sonli ustun topilmadi."}
+
+    sample = df[[target_x_col, target_y_col]].copy()
+    sample[target_x_col] = pd.to_numeric(sample[target_x_col], errors="coerce")
+    sample[target_y_col] = pd.to_numeric(sample[target_y_col], errors="coerce")
+    sample = sample.dropna(subset=[target_x_col, target_y_col]).head(top_n)
+    if sample.empty:
+        return {"error": "Scatter chart uchun mos ma'lumot topilmadi."}
+
+    chart_data = clean_records(sample[[target_x_col, target_y_col]])
+    return {
+        "chart": {
+            "chart_type": "scatter",
+            "title": f"{target_x_col} va {target_y_col} bog'liqligi",
+            "x": target_x_col,
+            "y": target_y_col,
+            "data": chart_data,
+        },
+        "meta": {
+            "x_column": target_x_col,
+            "y_column": target_y_col,
+            "top_n": top_n,
+        },
+    }
+
+
 TOOL_HANDLERS = {
     "get_columns": get_columns,
     "get_dataset_summary": get_dataset_summary,
@@ -252,4 +453,5 @@ TOOL_HANDLERS = {
     "filter_metric": filter_metric,
     "trend_over_time": trend_over_time,
     "list_unique_values": list_unique_values,
+    "prepare_chart_data": prepare_chart_data,
 }
