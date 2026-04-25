@@ -4,3 +4,4 @@ plotly
 openai
 openpyxl
 sqlalchemy
+python-dotenv

@@ -2,6 +2,9 @@ from openai import OpenAI
 import pandas as pd
 from database import load_from_db
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -38,7 +41,7 @@ def get_agent_response(user_query):
 
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Siz tajribali ma'lumotlar tahlilchisisiz."},
                 {"role": "user", "content": prompt}
