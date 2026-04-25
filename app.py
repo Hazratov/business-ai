@@ -25,7 +25,7 @@ T = {
     "sales_by_region": "Hududlar bo'yicha sotuv",
     "agent_section": "🤖 Sun'iy Intellekt Analitigi",
     "ask_placeholder": "Savolingizni yozing (masalan: Eng ko'p sotilgan mahsulot qaysi?)",
-    "send_btn": "So'rash",
+    "send_btn": "Yuborish",
     "no_data": "Iltimos, tahlil qilish uchun ma'lumot yuklang.",
     "success_upload": "Fayl muvaffaqiyatli yuklandi!"
 }
