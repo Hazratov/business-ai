@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import uuid
 from database import init_db, save_to_db, load_from_db
-import os
 
 # Page configuration
 st.set_page_config(page_title="Sotuv Ma'lumotlari Analizatori", layout="wide")
@@ -26,6 +26,9 @@ T = {
     "agent_section": "🤖 Sun'iy Intellekt Analitigi",
     "ask_placeholder": "Savolingizni yozing (masalan: Eng ko'p sotilgan mahsulot qaysi?)",
     "send_btn": "Yuborish",
+    "new_chat_btn": "Yangi chat",
+    "chat_history": "🧠 Chat tarixi",
+    "session_label": "Joriy sessiya",
     "no_data": "Iltimos, tahlil qilish uchun ma'lumot yuklang.",
     "success_upload": "Fayl muvaffaqiyatli yuklandi!"
 }
@@ -38,6 +41,11 @@ def find_column(df, keywords):
 
 def main():
     st.title(T["title"])
+
+    if "chat_session_id" not in st.session_state:
+        st.session_state["chat_session_id"] = str(uuid.uuid4())
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = []
 
     # Sidebar for file upload
     with st.sidebar:
@@ -100,15 +108,39 @@ def main():
         # AI Agent Section
         st.divider()
         st.subheader(T["agent_section"])
+
+        session_col1, session_col2 = st.columns([3, 1])
+        session_col1.caption(f"{T['session_label']}: {st.session_state['chat_session_id']}")
+        if session_col2.button(T["new_chat_btn"]):
+            st.session_state["chat_session_id"] = str(uuid.uuid4())
+            st.session_state["chat_history"] = []
+            st.rerun()
+
         user_input = st.text_input(T["ask_placeholder"])
         if st.button(T["send_btn"]):
             if user_input:
                 with st.spinner("Agent tahlil qilmoqda..."):
                     from agent import get_agent_response
-                    response = get_agent_response(user_input)
+                    response = get_agent_response(
+                        user_input,
+                        session_id=st.session_state["chat_session_id"],
+                    )
+                    st.session_state["chat_history"].append(
+                        {
+                            "question": user_input,
+                            "answer": response,
+                        }
+                    )
                     st.markdown(f"**Javob:**\n\n{response}")
             else:
                 st.warning("Iltimos, savol kiriting.")
+
+        if st.session_state["chat_history"]:
+            with st.expander(T["chat_history"], expanded=False):
+                for item in reversed(st.session_state["chat_history"][-10:]):
+                    st.markdown(f"**Savol:** {item['question']}")
+                    st.markdown(f"**Javob:** {item['answer']}")
+                    st.divider()
     else:
         st.info(T["no_data"])
 
